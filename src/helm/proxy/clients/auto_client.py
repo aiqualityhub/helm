@@ -210,6 +210,7 @@ class AutoClient(Client):
             elif organization == "nvidia":
                 from helm.proxy.clients.megatron_client import MegatronClient
 
+                # Tokenizer should match MegatronWindowService.tokenizer_name
                 client = MegatronClient(tokenizer=self._get_tokenizer("huggingface/gpt2"), cache_config=cache_config)
 
             elif organization == "lightningai":
@@ -226,7 +227,6 @@ class AutoClient(Client):
                 from helm.proxy.clients.vision_language.idefics_client import IDEFICSClient
 
                 # Tokenizer should match WindowServiceFactory.get_window_service(model).tokenizer_name
-                # which is the same as model
                 client = IDEFICSClient(tokenizer=self._get_tokenizer(model), cache_config=cache_config)
             else:
                 raise ValueError(f"Could not find client for model: {model}")
