@@ -53,7 +53,7 @@ class ServerService(Service):
         maybe_register_tokenizer_configs_from_base_path(base_path)
 
         self.client = AutoClient(credentials, cache_path, mongo_uri)
-        self.token_counter = AutoTokenCounter(self.client.get_huggingface_client())
+        self.token_counter = AutoTokenCounter(self.client.get_huggingface_tokenizer())
         self.accounts = Accounts(accounts_path, root_mode=root_mode)
         # Lazily instantiated by get_toxicity_scores()
         self.toxicity_classifier_client: Optional[ToxicityClassifierClient] = None
