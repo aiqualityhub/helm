@@ -22,7 +22,6 @@ from helm.proxy.critique.critique_client import CritiqueClient
 from helm.proxy.clients.toxicity_classifier_client import ToxicityClassifierClient
 from helm.proxy.retry import NonRetriableException, retry_request
 from helm.proxy.tokenizers.tokenizer import Tokenizer
-from helm.proxy.tokenizers.huggingface_tokenizer import HuggingFaceTokenizer
 
 from .http_model_client import HTTPModelClient
 
@@ -69,7 +68,6 @@ class AutoClient(Client):
         if client is None:
             organization: str = model.split("/")[0]
             cache_config: CacheConfig = self._build_cache_config(organization)
-            tokenizer: Tokenizer = self._get_tokenizer(organization)
 
             # TODO: Migrate all clients to use model deployments
             model_deployment = get_model_deployment(model)
@@ -104,14 +102,18 @@ class AutoClient(Client):
                 )
                 client = create_object(client_spec)
             elif organization == "neurips":
-                client = HTTPModelClient(tokenizer=tokenizer, cache_config=cache_config)
+                client = HTTPModelClient(cache_config=cache_config)
             elif organization == "openai":
                 from helm.proxy.clients.openai_client import OpenAIClient
 
                 org_id = self.credentials.get("openaiOrgId", None)
                 api_key = self.credentials.get("openaiApiKey", None)
+                # HACK: OpenAIClient's tokenizer is only used by GPT-3.5 and GPT-4, which uses the
+                # cl100k_base tokenizer. So we always set the tokenizer to cl100k_base even if
+                # the given OpenAI model should actually use p50k_base or r50k_base.
+                # TODO: Get the tokenizer name from ModelDeployment instead.
                 client = OpenAIClient(
-                    tokenizer=tokenizer,
+                    tokenizer=self._get_tokenizer("anthropic/claude"),
                     cache_config=cache_config,
                     api_key=api_key,
                     org_id=org_id,
@@ -120,7 +122,6 @@ class AutoClient(Client):
                 from helm.proxy.clients.aleph_alpha_client import AlephAlphaClient
 
                 client = AlephAlphaClient(
-                    tokenizer=tokenizer,
                     api_key=self.credentials["alephAlphaKey"],
                     cache_config=cache_config,
                 )
@@ -128,7 +129,6 @@ class AutoClient(Client):
                 from helm.proxy.clients.ai21_client import AI21Client
 
                 client = AI21Client(
-                    tokenizer=tokenizer,
                     api_key=self.credentials["ai21ApiKey"],
                     cache_config=cache_config,
                 )
@@ -136,7 +136,6 @@ class AutoClient(Client):
                 from helm.proxy.clients.cohere_client import CohereClient
 
                 client = CohereClient(
-                    tokenizer=tokenizer,
                     api_key=self.credentials["cohereApiKey"],
                     cache_config=cache_config,
                 )
@@ -145,7 +144,6 @@ class AutoClient(Client):
 
                 org_id = self.credentials.get("gooseaiOrgId", None)
                 client = GooseAIClient(
-                    tokenizer=tokenizer,
                     api_key=self.credentials["gooseaiApiKey"],
                     cache_config=cache_config,
                     org_id=org_id,
@@ -153,13 +151,14 @@ class AutoClient(Client):
             elif organization == "huggingface":
                 from helm.proxy.clients.huggingface_client import HuggingFaceClient
 
-                client = HuggingFaceClient(tokenizer=tokenizer, cache_config=cache_config)
+                client = HuggingFaceClient(cache_config=cache_config)
             elif organization == "anthropic":
                 from helm.proxy.clients.anthropic_client import AnthropicClient
 
                 client = AnthropicClient(
                     api_key=self.credentials.get("anthropicApiKey", None),
-                    tokenizer=tokenizer,
+                    # Tokenizer should match AnthropicWindowService.tokenizer_name
+                    tokenizer=self._get_tokenizer("anthropic/claude"),
                     cache_config=cache_config,
                 )
             elif organization == "microsoft":
@@ -169,7 +168,6 @@ class AutoClient(Client):
                 lock_file_path: str = os.path.join(self.cache_path, f"{organization}.lock")
                 client = MicrosoftClient(
                     api_key=self.credentials.get("microsoftApiKey", None),
-                    tokenizer=tokenizer,
                     lock_file_path=lock_file_path,
                     cache_config=cache_config,
                     org_id=org_id,
@@ -177,10 +175,7 @@ class AutoClient(Client):
             elif organization == "google":
                 from helm.proxy.clients.google_client import GoogleClient
 
-                client = GoogleClient(
-                    tokenizer=tokenizer,
-                    cache_config=cache_config,
-                )
+                client = GoogleClient(cache_config=cache_config)
             elif organization in [
                 "together",
                 "databricks",
@@ -197,31 +192,32 @@ class AutoClient(Client):
 
                 client = TogetherClient(
                     api_key=self.credentials.get("togetherApiKey", None),
-                    tokenizer=tokenizer,
                     cache_config=cache_config,
                 )
             elif organization == "simple":
                 from helm.proxy.clients.simple_client import SimpleClient
 
-                client = SimpleClient(tokenizer=tokenizer, cache_config=cache_config)
+                client = SimpleClient(cache_config=cache_config)
             elif organization == "writer":
                 from helm.proxy.clients.palmyra_client import PalmyraClient
 
                 client = PalmyraClient(
                     api_key=self.credentials["writerApiKey"],
-                    tokenizer=tokenizer,
+                    # Tokenizer should match PalmyraWindowService.tokenizer_name
+                    tokenizer=self._get_tokenizer("huggingface/gpt2"),
                     cache_config=cache_config,
                 )
             elif organization == "nvidia":
                 from helm.proxy.clients.megatron_client import MegatronClient
 
-                client = MegatronClient(tokenizer=tokenizer, cache_config=cache_config)
+                client = MegatronClient(tokenizer=self._get_tokenizer("huggingface/gpt2"), cache_config=cache_config)
 
             elif organization == "lightningai":
                 from helm.proxy.clients.lit_gpt_client import LitGPTClient
 
                 client = LitGPTClient(
-                    tokenizer=tokenizer,
+                    # Tokenizer should match LitGPTWindowService.tokenizer_name
+                    tokenizer=self._get_tokenizer("lightningai/lit-gpt"),
                     cache_config=cache_config,
                     checkpoint_dir=Path(os.environ.get("LIT_GPT_CHECKPOINT_DIR", "")),
                     precision=os.environ.get("LIT_GPT_PRECISION", "bf16-true"),
@@ -229,7 +225,9 @@ class AutoClient(Client):
             elif organization == "HuggingFaceM4":
                 from helm.proxy.clients.vision_language.idefics_client import IDEFICSClient
 
-                client = IDEFICSClient(tokenizer=tokenizer, cache_config=cache_config)
+                # Tokenizer should match WindowServiceFactory.get_window_service(model).tokenizer_name
+                # which is the same as model
+                client = IDEFICSClient(tokenizer=self._get_tokenizer(model), cache_config=cache_config)
             else:
                 raise ValueError(f"Could not find client for model: {model}")
             self.clients[model] = client
@@ -456,6 +454,5 @@ class AutoClient(Client):
             assert isinstance(self._huggingface_client, HuggingFaceClient)
             return self._huggingface_client
         cache_config = self._build_cache_config("huggingface")
-        tokenizer = HuggingFaceTokenizer(cache_config)
-        self._huggingface_client = HuggingFaceClient(tokenizer=tokenizer, cache_config=cache_config)
+        self._huggingface_client = HuggingFaceClient(cache_config=cache_config)
         return self._huggingface_client
